@@ -2,9 +2,9 @@
 
 List of participants and affiliations:
 - Weiping Chen (NIDDK) (Team Leader)
+- Guanjie Chen (NHGRI) (Tech Lead)
+- Qing Li (NHGRI) (Writer)
 - Chimenya Ntweya (Queen Elizabeth Central hospital, Blantyre, Malawi)
-- Qing Li (NHGRI)
-- Guanjie Chen (NHGRI)
 
 ## Project Goals
 Use machine learning modules to detect high-order interaction among genomic, omic features that associated with the phenotype. 
@@ -13,7 +13,7 @@ Use machine learning modules to detect high-order interaction among genomic, omi
 We use an example dataset with clinical phenotypes and rna expression data for indivudals. We apply machine learning modules to find the important features. Then, for downstream data exploration, we map the features using gene annotation in NCBI databases and create network representations for the interactions. 
 
 ## Results
-The performance of feature selections / prediction module will be evaluable based on ROC curves. The purpose of presenting the network of interactions is more for data visualization. 
+The performance of feature selections / prediction module will be evaluable based on prediction error. The purpose of presenting the network of interactions is more for data visualization. 
 
 ## Future Work
 
