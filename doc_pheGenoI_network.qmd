@@ -1,0 +1,186 @@
+---
+title: "Protein Network from GWAS Hits"
+author: "Qing Li"
+format: html
+Team Lead: Weiping Chen (NIDDK)
+Technical Lead: Guanjie Chen (NHGRI)
+Visual presenters: Qing Li (NHGRI)
+---
+
+## Goal
+
+To use STRING.DB to visualize the network of proteins that is related to hypertension and blood pressure (HTN related traits).
+
+## Source data
+
+Data original source: https://www.ncbi.nlm.nih.gov/gap/phegeni. The Phenotype-Genotype Integrator (PheGenI), merges NHGRI genome-wide association study (GWAS) catalog data with several databases housed at the National Center for Biotechnology Information (NCBI), including Gene, dbGaP, OMIM, eQTL and dbSNP. More comprehensive lists can be obtained from other sources. For this Codeathon events, we only use this list as a toy example.
+
+Obtain the data from NCBI website
+
+```{bash}
+wget "https://www.ncbi.nlm.nih.gov/projects/gap/eqtl/EpiViewBE.cgi?type=dl.tab"
+```
+
+## Processing the table of GWAS results
+
+In this session, we conducted prelimiary descriptive analysis of the results table. Then we extracted the records related to hypertension and blood pressure (HTN related traits).
+
+### Descriptive analysis of GWAS results
+
+For visualization, it is easier to display the significant level of p-value than its original scale.
+
+```{r}
+setwd("//data/liq4/CCDGS_y2024/codeathon/script_network")
+dd= read.csv("../publicdata/PheGenI_Association_full.tab", sep="\t", header=T, as.is=T)
+str(dd)
+
+## let us modify the pvalue to show -log10() scale
+## need to take care of P.Value=0
+lowest.P = min (dd$P.Value[dd$P.Value!=0])
+dd$P.Value[dd$P.Value==0] = lowest.P
+dd$p.sig= -log10(dd$P.Value)
+```
+
+Remove outliers from the table. Some traits that comes from one study with many GWAS hits for one trait. For example, to note that "Platelet Function Tests" return 16346 signification SNPs (11% of the GWAS hits). We would consider them as outliers.
+
+```{r}
+#library(dplyr)
+#library(tidyverse)
+dd$studyTrait=paste(dd$Study.ID, dd$Trait, sep="_")
+tb.summary = dd %>% group_by (studyTrait) %>% summarise(Freq=n()) %>% arrange(desc(Freq))
+tb.summary
+```
+
+```{r}
+dd=dd[!is.element(dd$studyTrait, 
+                  c("375_Platelet Function Tests", "267_Child Development Disorders, Pervasive")), ]
+dim(dd)
+tb.summary = dd %>% group_by (studyTrait) %>% summarise(Freq=n()) %>% arrange(desc(Freq))
+tb.summary
+```
+
+Histogram of distribution of counts for SNP, studied traits and nearby genes for significant SNPs. We can see for a majority of the reported GWAS hits, most of the significant SNP are only reported for one trait.
+
+```{r}
+## show the enrichment of trait, SNP and genes
+tb.trait=sort(table(dd$Trait), decreasing = T)
+tb.SNP = sort(table(dd$SNP.rs), decreasing = T)
+tb.gene=sort(table(dd$Gene), decreasing = T)
+
+tb.psig=sort(table(dd$p.sig), decreasing = T)
+
+hist(tb.SNP, main="Histogram of counts of SNPs") #(1-200, mode=1, there are some 2s)
+hist(tb.trait, main="Histogram of counts of traits") #(1-150000, model=1,2)
+hist(tb.gene, main="Histogram of counts of genes annotated for the SNPs")
+```
+
+Now let us see the distributions of the p-value significant levels for all GAWS hits
+
+```{r}
+hist(tb.psig, main=c("Histogram of p-value significant levels", "among all GWAS hits"), xlab="-log10(p-value); the higher value, the more significant")
+hist(tb.psig[tb.psig<=10], xlim=c(0, 14), main=c("Histogram of p-value significant levels among all GWAS hits", "excluding extreme low p.value < 10^(-40)"), xlab="-log10(p-value); the higher value, the more significant")
+```
+
+### Extract lists of genes for HTN related traits
+
+We would like to extract all the GWAS hits for trait "hypertension" and "blood pressure". For each SNP, the table show the gene annotation. We will use the first two annotated gene as the gene associated with hypertension. If the same gene is associated with other traits, we would also tally the occurrence for those gene implicated for other traits.
+
+```{r}
+pTrait.filter = (dd$Trait=="Hypertension" | dd$Trait=="Blood Pressure")
+dd.trait1=dd[pTrait.filter, ]
+dim(dd.trait1)
+trait.gene = unique(c(dd.trait1$Gene, dd.trait1$Gene.2))
+length(trait.gene)
+```
+
+We have 4976 gene implicated for 2907 significant SNPs for HTN related traits. We would like to see the chromosomes distribution of those significant SNPs as well as if those genes are implicated for other significant associations with other traits.
+
+```{r}
+table(dd.trait1$Chromosome)
+dd.otherTrait = dd[!pTrait.filter, ]
+dim(dd.otherTrait)
+dd.oth1 = dd.otherTrait[is.element(dd.otherTrait$Gene.1, trait.gene), ]
+dd.oth2 = dd.otherTrait[is.element(dd.otherTrait$Gene.2, trait.gene), ]
+dd.oth = rbind(dd.oth1, dd.oth2)
+hist(log10(table(dd.oth$Trait)))  ## on log10 scale for occurance of other traits
+```
+
+What are the other traits that share the same significant gene association signals as HTN related traits? List the top 20:
+
+```{r}
+ct.trait = table(dd.oth$Trait)
+tmp = sort(ct.trait, decreasing = T)[1:20]
+top.relatedT = cbind(ct =unlist(tmp))
+top.relatedT
+```
+
+### Identify other traits that share the same associated genes
+
+Given the list of 4976 genes indicated by HTN related traits, we tally how many the genes also appear for other traits. Take the top three other traits that share the most number of associated genes with HTN related traits.
+
+```{r}
+oth.totalSNP = dd.oth %>% group_by(Trait) %>% summarise(Freq=n()) ## total SNPs by trait
+oth.sameGene = dd.oth %>% group_by(Trait) %>% mutate(sameG = is.element(Gene, trait.gene))%>% summarise(sameGCt = sum(sameG)) %>% arrange(desc(sameGCt))
+oth.sameGene = oth.sameGene %>% merge(oth.totalSNP) %>% mutate(prop=sameGCt/Freq) %>% arrange(desc(sameGCt))
+hist(oth.sameGene$prop)
+hist(oth.sameGene$sameGCt)
+oth.sameGene
+```
+
+We would like to keep those traits with large number of shared genes with HTN related traits, at the same time, the proption of those shared genes is also high among trait specic hits. In anothe words, the large number of shared genes are not driven by its own large number of GWAS hits.
+
+```{r}
+plot(oth.sameGene$Freq, oth.sameGene$sameGCt, xlim=c(0, 1400), ylim=c(0, 1400), xlab="Total SNPs reported", ylab="Shared gene counts with HTN", main=c("By Traits: Number of GWAS hits", "vs. Number of Shared Genes"))
+abline(a=0, b=1,lty="dotted", col="blue")
+```
+
+Only keep the traits with total SNPs reported \> 800. We considered "Body Mass Index", "Bronchodilator Agents", and "Cholesterol, HDL" most related to HTN related traits due to enrichment of shared genes among them.
+
+```{r}
+trait.related = oth.sameGene %>% filter(Freq>800)
+trait.related
+dd.othKept = dd.oth %>% filter( is.element(Trait, trait.related$Trait))
+dim(dd.othKept)
+```
+
+```{r}
+dd.trait2 = rbind(dd.othKept, dd.trait1)
+da.ven = dd.trait2 %>% select(Trait, Gene) %>% group_by(Trait) %>% summarise_all(~list(unique(Gene)))
+str(da.ven)
+da.ven.plot.input = da.ven$Gene
+names(da.ven.plot.input)=da.ven$Trait
+str(da.ven.plot.input)
+```
+
+```{r}
+## double checking code
+da.ven2 = dd.trait2 %>% select(Trait, Gene)
+tmp = tapply(da.ven2, list(da.ven2$Trait), unique)
+str(tmp)
+```
+
+## Venn diagrams showing shared genes 
+
+```{r}
+#library("ggVennDiagram")
+ggVennDiagram(da.ven.plot.input, label_alpha = 0, label="count")+ 
+  scale_fill_gradient(low = "#F4FAFE", high = "#4981BF")+scale_x_continuous(expand = expansion(mult = .2))
+
+ggVennDiagram(da.ven.plot.input[c(1,5)], label_alpha = 0)+scale_fill_distiller(palette = "RdBu")+scale_x_continuous(expand = expansion(mult = .2))
+
+ggVennDiagram(da.ven.plot.input[c(1,4,5)], label_alpha = 0)+scale_fill_distiller(palette = "RdBu")+scale_x_continuous(expand = expansion(mult = .2))
+ggVennDiagram(da.ven.plot.input[c(1,2,5)], label_alpha = 0)+scale_fill_distiller(palette = "RdBu")+scale_x_continuous(expand = expansion(mult = .2))
+ggVennDiagram(da.ven.plot.input[c(1,3,5)], label_alpha = 0)+scale_fill_distiller(palette = "RdBu")+scale_x_continuous(expand = expansion(mult = .2))
+ggVennDiagram(da.ven.plot.input[c(2,3,4)], label_alpha = 0)+scale_fill_distiller(palette = "RdBu")+scale_x_continuous(expand = expansion(mult = .2))
+
+```
+
+## Gene network overlaid by protein network
+
+We extracted the genes shared among hypertension, blood pressure and cholesterol (HDL), and construct the network showing the strength of association signals. We also query the protein network predicted by STRING.db using the whole list of genes associated with the three traits.
+
+```{r}
+dd.network = dd.trait2 %>% filter(is.element(Trait, da.ven$Trait[c(1,4,5)])) %>% select(Trait, Gene, Chromosome, p.sig, Context)
+dim(dd.network)
+write.table(dd.network, file="network_HTN_3T_GWAS_gene.csv", sep=",", quote=T, col.names = T, row.names = F)                                  
+```
